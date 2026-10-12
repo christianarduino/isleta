@@ -15,6 +15,9 @@
 # on it, and this one is the header of the riskiest script in the repository — if you change
 # what this does, change this too, in the same commit.**
 #
+# Added 2026-10-12, not yet run in a real release: after publishing, the script bumps the
+# Homebrew cask in ../homebrew-tap (or $HOMEBREW_TAP_DIR) and commits it there, unpushed.
+#
 # The EdDSA key pair was generated on 2026-08-19 and SUPublicEDKey holds the real public
 # half, so prerequisite 1 below is history rather than a to-do.
 #
@@ -410,6 +413,38 @@ gh release create "v$VERSION" "$ZIP_PATH" --title "v$VERSION" --notes-file "$REL
 
 echo ""
 echo "✅ Released v$VERSION"
+
+# ─── Homebrew cask ──────────────────────────────────────────────────────────
+# `brew install --cask idevtim/tap/isleta` installs whatever version the cask names, so a release
+# that skips this leaves every *new* Homebrew install one version behind. Existing installs don't
+# notice — the cask says `auto_updates true` and Sparkle updates them — which is exactly why a stale
+# cask goes unseen.
+#
+# The hash is of $ZIP_PATH, the bytes `gh release create` just uploaded, so it matches the download
+# without fetching it back. The tap is a separate repository (it has to be named `homebrew-tap`);
+# this commits the bump there and stops, because nothing here pushes. Runs after the release, so a
+# failure here is reported and never undoes one.
+HOMEBREW_TAP_DIR="${HOMEBREW_TAP_DIR:-$(dirname "$PROJECT_DIR")/homebrew-tap}"
+CASK_PATH="$HOMEBREW_TAP_DIR/Casks/isleta.rb"
+if [ ! -f "$CASK_PATH" ]; then
+  echo "⚠️  No cask at $CASK_PATH — set HOMEBREW_TAP_DIR, then bump it by hand."
+else
+  ZIP_SHA256=$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')
+  sed -i '' -E \
+    -e "s/^(  version )\"[^\"]*\"/\1\"$VERSION\"/" \
+    -e "s/^(  sha256 )\"[^\"]*\"/\1\"$ZIP_SHA256\"/" \
+    "$CASK_PATH"
+  if grep -q "^  version \"$VERSION\"$" "$CASK_PATH" && grep -q "^  sha256 \"$ZIP_SHA256\"$" "$CASK_PATH"; then
+    git -C "$HOMEBREW_TAP_DIR" commit -q -m "feat: update isleta to $VERSION" -- Casks/isleta.rb >/dev/null 2>&1 \
+      || echo "   cask already at $VERSION"
+    echo "🍺 Cask bumped to $VERSION in $HOMEBREW_TAP_DIR"
+    echo "   Push it — until that lands, brew installs the previous version."
+  else
+    echo "⚠️  Could not rewrite version/sha256 in $CASK_PATH — bump it by hand:"
+    echo "     version \"$VERSION\"   sha256 \"$ZIP_SHA256\""
+  fi
+fi
+echo ""
 # The appcast is regenerated in place, in this repo, which is the repo `SUFeedURL` points at. It is
 # left as a working-tree change rather than committed automatically: publishing an update is the one
 # step that should need a person to look at it before it goes out.

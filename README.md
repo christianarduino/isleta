@@ -42,6 +42,8 @@ It stays invisible until it has something to say. Move your pointer onto the not
 
 macOS 26 or later · Apple silicon
 
+or with [Homebrew](https://brew.sh): `brew install --cask idevtim/tap/isleta`
+
 </div>
 
 ---
