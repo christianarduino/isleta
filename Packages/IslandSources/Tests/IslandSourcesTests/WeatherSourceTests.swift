@@ -235,6 +235,67 @@ struct WeatherSourceTests {
     }
 }
 
+/// A resolver whose current-location answer is slow and refused, and whose city answer is quick —
+/// the shape of a Mac whose grant was reset, asked about a city typed while that first ask is out.
+@MainActor
+private final class SlowLocationResolver: WeatherPlaceResolving {
+    var access: LocationAccess = .notDetermined
+    var onAccessChange: ((LocationAccess) -> Void)?
+    private(set) var asked: [WeatherPlaceSource] = []
+
+    func place(for source: WeatherPlaceSource) async throws -> WeatherPlace {
+        asked.append(source)
+        switch source {
+        case .currentLocation:
+            try? await Task.sleep(for: .milliseconds(300))
+            throw WeatherUnavailable.noPlace
+        case .city(let name):
+            return WeatherPlace(latitude: 51.5, longitude: -0.12, name: name)
+        }
+    }
+}
+
+@Suite("Weather source — a place changed mid-ask")
+@MainActor
+struct WeatherSourcePlaceChangeTests {
+
+    @Test("a city typed while an earlier ask is out is still asked about")
+    func typedCitySupersedesTheAskInFlight() async {
+        // The ask in flight used to swallow every refresh behind it, so the city was dropped and the
+        // stale ask's failure was what the island drew — "Weather not available right now".
+        let provider = StubWeatherProvider()
+        let resolver = SlowLocationResolver()
+        let source = WeatherSource(provider: provider, resolver: resolver, placeSource: .currentLocation)
+        var readings: [WeatherReading?] = []
+        source.onReading = { readings.append($0) }
+        source.start()
+        source.setPresented(true)
+        await waitUntil { !resolver.asked.isEmpty }
+
+        source.apply(placeSource: .city("London"), unit: .celsius)
+        await waitUntil({ readings.contains { $0 != nil } }, deadline: .seconds(3))
+
+        #expect(resolver.asked.contains(.city("London")))
+        #expect(readings.last.flatMap { $0 } != nil)
+        source.stop()
+    }
+
+    @Test("typing a city asks once it has stopped changing, not once per letter")
+    func typingIsAskedAboutOnce() async {
+        let provider = StubWeatherProvider()
+        let resolver = SlowLocationResolver()
+        let source = WeatherSource(provider: provider, resolver: resolver, placeSource: .city(""))
+        source.start()
+        for prefix in ["L", "Lo", "Lon", "Lond", "Londo", "London"] {
+            source.apply(placeSource: .city(prefix), unit: .celsius)
+        }
+        await waitUntil({ resolver.asked.contains(.city("London")) }, deadline: .seconds(3))
+        let cities = resolver.asked.filter { $0 != .currentLocation }
+        #expect(cities == [.city("London")])
+        source.stop()
+    }
+}
+
 @Suite("Location access")
 struct LocationAccessTests {
 

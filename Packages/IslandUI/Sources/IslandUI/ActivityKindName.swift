@@ -36,6 +36,7 @@ enum ActivityKindName {
         case .fileAction: islandText("activityKind.fileAction", "File Action")
         case .focusChanged: islandText("activityKind.focusChanged", "Focus")
         case .screenSharing: islandText("activityKind.screenSharing", "Screen Sharing")
+        case .updateAvailable: islandText("activityKind.updateAvailable", "Update")
         }
     }
 }

@@ -148,3 +148,12 @@
 
 "lockScreen.locked" = "Gesperrt";
 "lockScreen.unlocked" = "Entsperrt";
+
+/* An update waiting */
+"activityKind.updateAvailable" = "Update";
+"update.header" = "Isleta %@ ist verfügbar";
+"update.whatsNew" = "Neuigkeiten";
+"update.noNotes" = "Zu diesem Update gibt es keine Versionshinweise.";
+"update.install" = "Update installieren …";
+"update.install.a11y" = "Das Update installieren";
+"update.install.help" = "Schließt die Insel und öffnet das Update-Fenster, in dem du es installieren und Isleta neu starten kannst.";

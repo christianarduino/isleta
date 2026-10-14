@@ -88,6 +88,15 @@ public enum ActivityKind: String, CaseIterable, Sendable {
     /// is in, which the user is owed a persistent reminder of.
     case screenSharing
 
+    /// A newer Isleta is published. Isleta's app icon in one flank and a download glyph in the
+    /// other, and opening the island shows what is new and the button that hands over to Sparkle.
+    ///
+    /// Something that arrived rather than a page — it is there because a check found something, and
+    /// it goes when the user has seen the update in Sparkle's window. It never expires on a clock:
+    /// an update is still available tomorrow, and a reminder that quietly lapsed would be no
+    /// reminder at all.
+    case updateAvailable
+
     /// Where this kind sits by default. A provider may override it, but starting from the kind is
     /// what stops a volume HUD shipping at `.ambient` and never being seen.
     public var defaultPriority: ActivityPriority {
@@ -103,6 +112,9 @@ public enum ActivityKind: String, CaseIterable, Sendable {
         // genuinely just happened. `.glance` is never presented and this answer is never read — it
         // is here because the switch is exhaustive. See the case's own note.
         case .glance, .fileAction: .standard
+        // Above the music, so opening the island shows the update until it has been looked at —
+        // and below everything that happened just now, which an update can always wait behind.
+        case .updateAvailable: .standard
         case .welcomeBack, .deviceConnected: .prominent
         // A calendar alert and a joinable meeting are `.prominent` on the same argument the
         // greeting is: something happened, it has the user's name on it, and it expires.
@@ -138,6 +150,7 @@ public enum ActivityKind: String, CaseIterable, Sendable {
         // every one of them the source knows, and an expiry would be Isleta guessing over the top
         // of a source that has the answer.
         case .call, .fileAction, .screenSharing: .never
+        case .updateAvailable: .never
         // Never presented, so never expired. `.never` rather than a duration because a page does
         // not time out — the user turns away from it. See the case's own note.
         case .glance: .never
@@ -226,6 +239,7 @@ public enum ActivityKind: String, CaseIterable, Sendable {
         case .fileAction: "wand.and.rays"
         case .focusChanged: "moon.fill"
         case .screenSharing: "record.circle"
+        case .updateAvailable: "arrow.down.circle.fill"
         }
     }
 
@@ -255,6 +269,11 @@ public enum ActivityKind: String, CaseIterable, Sendable {
         // answering `.leading` here is precisely what took the album cover's sliver while it did —
         // both it and `.nowPlaying` wanted the same side, and the primary won.
         case .glance, .calendarAlert, .meeting, .call, .focusChanged, .screenSharing: .leading
+        // **Leading, so Isleta's icon is what survives sharing.** Alone the update fills both flanks
+        // — the icon left, the download glyph right. Beside the music the pair splits and the half
+        // kept is the primary's own flank, so the icon stays, and it wears the download mark on its
+        // corner so "update" is still said once the glyph's half has gone to the music.
+        case .updateAvailable: .leading
         // The first kind to want the other sliver, and the reason the table exists. A timer's
         // content *is* a number, so it belongs where the other kinds put their numbers — which
         // also puts music on the left of the notch and a countdown on the right whichever of the
@@ -329,7 +348,8 @@ public enum ActivityKind: String, CaseIterable, Sendable {
         // is already the answer (artwork, a device, a ring, a level), and the rest have no sibling
         // to be told apart from.
         case .nowPlaying, .welcomeBack, .shelf, .timer, .deviceConnected, .glance,
-             .calendarAlert, .meeting, .call, .fileAction, .focusChanged, .screenSharing:
+             .calendarAlert, .meeting, .call, .fileAction, .focusChanged, .screenSharing,
+             .updateAvailable:
             .standard
         }
     }
@@ -351,7 +371,8 @@ public enum ActivityKind: String, CaseIterable, Sendable {
         switch self {
         case .systemHUD: true
         case .nowPlaying, .welcomeBack, .shelf, .timer, .deviceConnected, .glance,
-             .calendarAlert, .meeting, .power, .call, .fileAction, .focusChanged, .screenSharing:
+             .calendarAlert, .meeting, .power, .call, .fileAction, .focusChanged, .screenSharing,
+             .updateAvailable:
             false
         }
     }
@@ -374,6 +395,8 @@ public enum ActivityKind: String, CaseIterable, Sendable {
         // island too would be opening something that is opening.
         case .glance, .calendarAlert, .power, .fileAction,
              .focusChanged, .screenSharing: false
+        // A reminder, not an interruption: the flanks say it, and opening is the user's choice.
+        case .updateAvailable: false
         // A finished timer does **not** open the island by itself. It arrives `.interrupting`, so
         // it takes the stage and is visible in the flanks with no click — the same way a volume HUD
         // is.
@@ -667,6 +690,42 @@ public struct BuiltInActivity: IslandActivity, Equatable {
     /// `nil` rather than `""`, because `ActivityContent.isEmpty` is what tells IslandUI to draw
     /// nothing at all; an empty string would reserve a line's worth of height for a subtitle that
     /// has no text in it, and the island would sit a few points taller for an unnamed artist.
+    /// A newer Isleta is published: the icon, the download glyph, and nothing in the body.
+    ///
+    /// The body is empty on purpose, the way the shelf's and the glance's are — the release notes are
+    /// a scrolling list with a button under it, which is a surface of its own
+    /// (`UpdateAvailableLayerView`) rather than four slots of `ActivityContent`, and an empty
+    /// `expanded` is what makes the slot layer stand down for it.
+    ///
+    /// - Parameter applicationName: the display name the icon is looked up by — Isleta's own.
+    public static func updateAvailable(version: String, applicationName: String) -> Self {
+        let spoken = activityText("update.available.a11y", "Isleta \(version) is available")
+        return Self(
+            kind: .updateAvailable,
+            presentations: ActivityPresentations(
+                leading: ActivityContent(
+                    symbol: "app.badge.fill",
+                    applicationIconName: applicationName,
+                    tint: .neutral,
+                    accessibilityLabel: spoken,
+                    badgeSymbol: "arrow.down.circle.fill"
+                ),
+                trailing: ActivityContent(
+                    symbol: "arrow.down.circle.fill",
+                    tint: .accent,
+                    accessibilityLabel: spoken
+                ),
+                compact: ActivityContent(
+                    symbol: "arrow.down.circle.fill",
+                    title: activityText("update.available", "Update available"),
+                    tint: .accent,
+                    accessibilityLabel: spoken
+                ),
+                expanded: .empty
+            )
+        )
+    }
+
     private static func joined(_ parts: [String?], separator: String) -> String? {
         let present = parts.compactMap { $0 }.filter { !$0.isEmpty }
         return present.isEmpty ? nil : present.joined(separator: separator)

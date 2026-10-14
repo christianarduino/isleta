@@ -72,6 +72,17 @@ public struct GlanceSettings: Equatable, Sendable {
     public var hasPlace: Bool {
         usesCurrentLocation || !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    /// Whether the weather really is following the Mac's location, given the grant as it stands.
+    ///
+    /// `usesCurrentLocation` is the *intention*; this is the *fact*. CoreLocation can be refused, or
+    /// reset long after the switch was turned on, and then the Glance pane draws the switch off and
+    /// the City field beneath it. **The weather source asks the same question**, so a city typed into
+    /// that field is the place asked about — it once read the intention alone, kept asking
+    /// CoreLocation, and drew "Weather not available right now" over a city that was right there.
+    public func followsLocation(given access: LocationAccess) -> Bool {
+        usesCurrentLocation && access == .granted
+    }
 }
 
 extension GlanceSettings: Codable {

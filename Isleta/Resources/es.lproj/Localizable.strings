@@ -92,3 +92,7 @@
 "onboarding.payoff.volume" = "Volumen";
 "onboarding.payoff.brightness" = "Brillo";
 "onboarding.payoff.mediaKeys" = "Teclas multimedia";
+
+/* An update waiting */
+"sources.updateAvailable.title" = "Actualizaciones";
+"sources.updateAvailable.summary" = "Avisa cuando hay una nueva versión de Isleta lista para instalar.";

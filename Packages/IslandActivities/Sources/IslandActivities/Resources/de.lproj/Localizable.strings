@@ -82,3 +82,7 @@
 "nowPlaying.format.hiResLossless" = "Hi-Res Lossless";
 "nowPlaying.format.dolbyAtmos" = "Dolby Atmos";
 "nowPlaying.format.multichannel" = "Mehrkanal";
+
+/* An update waiting */
+"update.available.a11y" = "Isleta %@ ist verfügbar";
+"update.available" = "Update verfügbar";

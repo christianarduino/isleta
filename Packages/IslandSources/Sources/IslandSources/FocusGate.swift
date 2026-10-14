@@ -144,6 +144,9 @@ public enum FocusSuppression {
         // Conditions rather than announcements: true for as long as they are true, and drawn
         // because the user looked, not because Isleta spoke.
         case .nowPlaying, .screenSharing: false
+        // An update waiting is a condition too, and a quiet one: it opens nothing and sounds
+        // nothing, and one dropped under a Focus would not come back until the next day's check.
+        case .updateAvailable: false
         // A ringing or connected call outranks a Focus, which has its own allow-calls rules that
         // this app cannot see. A dying battery outranks everything.
         case .call, .power: false

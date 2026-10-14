@@ -1086,7 +1086,7 @@ public struct SettingsView: View {
     /// can be revoked in System Settings long after somebody set this. Everything on this card reads
     /// the fact, so a switch is never on for a permission that is not there.
     private var usesCurrentLocation: Bool {
-        store.configuration.glance.usesCurrentLocation && glance.locationAccess == .granted
+        store.configuration.glance.followsLocation(given: glance.locationAccess)
     }
 
     /// "Use my location", which asks rather than assumes.

@@ -94,14 +94,15 @@ struct SourceTogglesTests {
         let flipped = !SourceToggles()[kind]
         toggles[kind] = flipped
 
-        // Two kinds have no source and no flag: they read true and cannot be switched off.
+        // Three kinds have no source and no flag: they read true and cannot be switched off.
         // `.shelf` is published from a drag session in the app shell, and `.focusChanged` has no
         // publisher at all and cannot get one — macOS raises no notification when a Focus changes,
         // so the only way to announce it would be a poll (see `SourceToggles.respectsFocus`, which
         // is what that slot became). Asserted rather than skipped, because "the write silently did
         // nothing" is only correct while it is deliberate — the day either gets a flag, this fails
-        // and says so.
-        guard kind != .shelf, kind != .focusChanged else {
+        // and says so. `.updateAvailable` is governed by Sparkle's own "check automatically"
+        // setting in General, and a second switch here would be two answers to one question.
+        guard kind != .shelf, kind != .focusChanged, kind != .updateAvailable else {
             #expect(toggles[kind])
             #expect(toggles == SourceToggles())
             return
@@ -118,7 +119,7 @@ struct SourceTogglesTests {
     @Test("the settings key path and the subscript agree", arguments: ActivityKind.allCases)
     func keyPathMatchesSubscript(kind: ActivityKind) throws {
         guard let keyPath = SourceToggles.keyPath(for: kind) else {
-            #expect(kind == .shelf || kind == .focusChanged)
+            #expect(kind == .shelf || kind == .focusChanged || kind == .updateAvailable)
             return
         }
         var configuration = IsletaConfiguration()

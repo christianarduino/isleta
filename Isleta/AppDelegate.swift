@@ -58,7 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commitPageDrag: { [weak self] steps in self?.commitPageDrag(by: steps) },
         settlePageDrag: { [weak self] in self?.settlePageDrag() },
         setTurnDirection: { [weak self] direction in self?.pages.setTurnDirection(direction) },
-        scrollDropHistory: { [weak self] sample in self?.dropHistory.scroll(sample) }
+        scrollDropHistory: { [weak self] sample in self?.dropHistory.scroll(sample) },
+        isShowingUpdateNotes: { [weak self] in self?.models.values.contains(where: \.drawsUpdateBody) ?? false },
+        scrollUpdateNotes: { [weak self] sample in self?.updateModel.scroll(sample) }
     )
 
     private let hotKeys = HotKeyMonitor()
@@ -138,6 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// What Isleta has done with the files it was given. App-wide for `shelfModel`'s reason: there
     /// is one user who did one set of things.
     private let dropHistoryModel = DropHistoryModel()
+
+    /// The update on offer, read by every island. See `offerUpdate(version:notesMarkdown:)`.
+    private let updateModel = UpdateAvailableModel()
 
     private lazy var dropHistory = DropHistoryController(
         model: dropHistoryModel,
@@ -1015,6 +1020,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The history rides on the screen model the way `nowPlaying` does — one app-wide model,
         // every island reading it.
         model.dropHistory = dropHistoryModel
+        model.softwareUpdate = updateModel
         applyAccessibility(to: model)
         applyAppearance(settings.configuration, to: model)
         // **A panel built while the screen is away starts away.** A display reconfiguration during
@@ -1252,8 +1258,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showingNowPlayingQueue: Bool? = nil,
         showingDropHistory: Bool? = nil,
         showingGlanceSchedule: Bool? = nil,
-        page: IslandPage? = nil
+        page: IslandPage? = nil,
+        coveringActivity: Bool? = nil
     ) -> CGFloat? {
+        // Whether the pages are standing in front of the activity on stage — see
+        // `IslandPageModel.isCoveringActivity`. A parameter for the reason `page` is one: a swipe
+        // from a call has to size the island for the page it is heading to before it gets there.
+        let covering = coveringActivity ?? pages.isCoveringActivity
         // The Up Next surface, above the activity: it wins over the player's own body because that
         // is what it replaces.
         //
@@ -1328,13 +1339,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A meeting keeps its own body wherever the user is, so it is asked before the pages —
         // `IslandRootView` draws it on the same terms, and the two have to agree or the island is
         // sized for one surface and drawing another.
-        if kind == .meeting, let height = glance.contentHeight(for: kind) { return height }
+        if kind == .meeting, !covering, let height = glance.contentHeight(for: kind) { return height }
+
+        // The update's notes and button: a constant, for `UpdateAvailableLayout`'s reason.
+        if kind == .updateAvailable, !covering { return UpdateAvailableLayout.contentHeight }
 
         // **The pages.** Whichever one is current decides the height, and the three are mutually
         // exclusive by construction — which is what pages bought over the flags they replaced. This
         // used to be a chain of `isShowing…` tests that could be true together, so the order here,
         // in `IslandRootView` and in `SwipeController` all had to be kept in step by hand.
-        if drawsPages(for: kind) {
+        if covering || drawsPages(for: kind) {
             // **The same function the page lays itself out with** — see `IslandPageHeight`, which
             // says why the page cannot simply measure the box it is in. Two answers here would be
             // the island sized for one arrangement and drawing another, which is the failure this
@@ -1380,6 +1394,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case nil, .glance, .nowPlaying: true
         default: false
         }
+    }
+
+    /// Whether the activity on stage is drawing its own body — the shell's copy of
+    /// `IslandScreenModel.activityOwnsBody`, and the reason a swipe lands on home rather than on
+    /// whichever page happened to be current underneath a call.
+    private func activityOwnsBody(for kind: ActivityKind?) -> Bool {
+        !pages.isCoveringActivity && !drawsPages(for: kind)
+    }
+
+    /// Where a page drag of `steps` lands from what the body is showing right now.
+    private func pageDragDestination(steppedBy steps: Int, kind: ActivityKind?) -> IslandPage {
+        activityOwnsBody(for: kind)
+            ? pages.roster.stepped(fromActivityBy: steps)
+            : pages.page(steppedBy: steps)
     }
 
     /// Opens or closes the Up Next surface on every island, through the same widen-then-tighten
@@ -1927,7 +1955,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshWeatherPolling() {
         let drawsAPage = models.values.contains(where: \.isExpanded)
-            && drawsPages(for: activities.stage?.primary.kind)
+            && (pages.isCoveringActivity || drawsPages(for: activities.stage?.primary.kind))
         let pageDrawsWeather = pages.current == .home || pages.current == .weather
         sources?.weather.setPresented(drawsAPage && pageDrawsWeather)
     }
@@ -2135,6 +2163,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Escape, the close gesture, and opening the player app in its own application. Each of those
     /// is the user aiming at *this island, now*, which settles the question of whose island it is as
     /// firmly as a click on it does — so what Isleta opened is no longer Isleta's to expire.
+    // MARK: - An update waiting
+
+    /// Connects Sparkle's gentle reminders to the island. Before `updater.start()`, so the first
+    /// scheduled check already has somewhere to hand what it finds.
+    private func wireUpdateReminder() {
+        updateModel.onInstall = { [weak self] in self?.installOfferedUpdate() }
+        updater.onUpdateAvailable = { [weak self] version, notes in
+            self?.offerUpdate(version: version, notesMarkdown: notes)
+        }
+        updater.onUpdateAttended = { [weak self] in self?.withdrawUpdate() }
+    }
+
+    /// A scheduled check found an update: Isleta's icon on the left, a download glyph on the right,
+    /// and the notes behind them for whoever opens the island.
+    private func offerUpdate(version: String, notesMarkdown: String?) {
+        updateModel.offer(version: version, notesMarkdown: notesMarkdown)
+        let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Isleta"
+        activities.present(BuiltInActivity.updateAvailable(version: version, applicationName: name))
+    }
+
+    /// Sparkle's window has the update now, or the session ended: the reminder goes.
+    private func withdrawUpdate() {
+        guard updateModel.isOffering else { return }
+        if let id = ActivityKind.updateAvailable.singletonID { activities.dismiss(id) }
+        updateModel.withdraw()
+    }
+
+    /// The button: close the island, then bring up Sparkle's window, where Install and Restart are.
+    ///
+    /// Closed first so the window does not open under an island that is still spread across the
+    /// top of the screen. The reminder itself stays until Sparkle says the update has been seen —
+    /// `withdrawUpdate()` — so a window dismissed some other way does not lose it.
+    private func installOfferedUpdate() {
+        IslandLog.updates.info("update opened from the island")
+        collapseAll()
+        updater.showUpdate()
+    }
+
+    #if DEBUG
+    private static var updateDemoVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+    }
+
+    /// This release's own notes, copied in so the demo shows a real length of text.
+    private static let updateDemoNotes = """
+# Isleta 2.6.0
+
+Swiping through an open island now always reaches your pages, album covers keep loading however
+long Isleta has been running, and a typed city always gets its weather.
+
+## Improved
+
+- **Swiping over a call, a meeting or a volume or brightness level opens your pages.** You go to
+  Today, then Music if something is playing, then Weather, instead of a second copy of what was
+  already on screen. Tapping a page dot works the same way.
+- **Album covers that are slow to load still arrive.** A cover the player is still downloading is
+  asked for again a few seconds later, rather than leaving the placeholder for the whole song.
+
+## Fixed
+
+- **Album covers no longer stop appearing after Isleta has run for days.** One stalled request could
+  stop every later cover, and the audio quality badge, from loading until Isleta was relaunched.
+- **A city you type is used for the weather.** If location access had been reset, the island kept
+  waiting for your location and said "Weather not available right now" instead of using the city.
+- **Typing a city asks for its weather once you stop typing**, rather than once for every letter.
+"""
+    #endif
+
     private func collapseAll() {
         autoOpened.removeAll()
         collapseIslands(Array(models.keys))
@@ -2388,6 +2484,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // armed would fire into an island that is not drawn — and, worse, leave the dots already
         // faded when the next open wants to show them.
         pages.hideIndicator()
+        // Before the guard for the same reason: a swipe from a call onto home moves no page, and
+        // the next open must show what is on stage rather than the pages that covered it.
+        pages.uncoverActivity()
+        // The notes start from their first line on the next open, like every list in the island.
+        updateModel.resetScroll()
         // **The page the island comes back to, which is not always home.** It remembers home and
         // music and deliberately does not remember the weather — see `IslandPageModel.rememberedPage`
         // — so this guard asks whether the reset would actually move anything rather than assuming
@@ -2469,6 +2570,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// mind.
     private var pageDragStep = 0
 
+    /// The activity a swipe turned the pages over, so a different one arriving can take the body
+    /// back. See `IslandPageModel.isCoveringActivity`.
+    private var coveredActivityID: ActivityID?
+
     /// The finger has picked a direction: put the page it is heading toward on screen, and let the
     /// island's outline start following the drag toward that page's height.
     ///
@@ -2497,12 +2602,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // are certainly being read — so the clock is stopped here and restarted where the gesture
         // ends, in `settlePageDrag` and in `commitPageDrag`'s landing.
         pages.holdIndicator()
-        let destination = pages.page(steppedBy: heading)
         let stage = activities.stage
+        let destination = pageDragDestination(steppedBy: heading, kind: stage?.primary.kind)
+        // `coveringActivity: true` because the destination is a page whatever the body is showing
+        // now — a swipe from a call is heading for the day's height, not the call's.
         let height = expandedContentHeightForStage(
             presentations: stage?.primary.presentations,
             kind: stage?.primary.kind,
-            page: destination
+            page: destination,
+            coveringActivity: true
         )
         let span = IslandLayout.expandedBodySize.width
         for screen in controller.screens {
@@ -2580,11 +2688,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pageDragStep = 0
         let stage = activities.stage
         let departing = pages.current
-        let page = pages.page(steppedBy: step)
+        let fromActivity = activityOwnsBody(for: stage?.primary.kind)
+        let page = pageDragDestination(steppedBy: step, kind: stage?.primary.kind)
         let height = expandedContentHeightForStage(
             presentations: stage?.primary.presentations,
             kind: stage?.primary.kind,
-            page: page
+            page: page,
+            coveringActivity: true
         )
         // The page being left, whose shape the outline has to keep lerping *from* while the tail
         // travels. Computed before the swap for the same reason the new one is: both are pure
@@ -2600,7 +2710,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the page layer a directional slide keyed on its identity, and a swipe has already done
         // all the travelling there is to do.
         withTransaction(Transaction(animation: nil)) {
-            _ = pages.go(to: page)
+            if fromActivity {
+                pages.turnFromActivity(to: page)
+            } else {
+                _ = pages.go(to: page)
+            }
+        }
+        // The weather poll follows the body, and a swipe from a call has just given it to a page.
+        if fromActivity {
+            coveredActivityID = stage?.primary.id
+            refreshWeatherPolling()
         }
         expandedContentHeight = height
         controller.expandedContentHeight = height
@@ -2653,6 +2772,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard pages.canTurn else { return }
         // A dot has no direction of its own, so it takes the shorter way round — sliding the way the
         // row of dots is laid out rather than always from the same side.
+        // Over an activity's body a dot is the same request a swipe is — the pages, starting at the
+        // one tapped — and `go(to:)` alone would turn `current` underneath a body it does not draw.
+        let stage = activities.stage
+        if activityOwnsBody(for: stage?.primary.kind) {
+            applyPageChange(direction: 1) { [weak self] in
+                guard let self else { return false }
+                self.pages.turnFromActivity(to: page)
+                self.coveredActivityID = stage?.primary.id
+                self.refreshWeatherPolling()
+                return true
+            }
+            return
+        }
         applyPageChange(direction: pages.steps(to: page) >= 0 ? 1 : -1) { [weak self] in
             self?.pages.go(to: page) ?? false
         }
@@ -2838,6 +2970,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // is safe to change what a swipe is walking.
         musicPageHasTrack = playingContent != nil
         refreshMusicPage()
+        // **Something new on stage is shown, not covered.** The pages stood in front of the one
+        // activity somebody swiped from; a different one arriving is a new reason to look. Before
+        // the height below, which asks whether the pages are still covering.
+        if pages.isCoveringActivity, stage?.primary.id != coveredActivityID {
+            pages.uncoverActivity()
+            coveredActivityID = nil
+        }
         // An auto-stow is about **music the user has finished with**, and about nothing else.
         // Anything else reaching the stage — a HUD, a timer, a call — is a thing the island
         // exists to show, and delivering it into an island Isleta had quietly put away would make a
@@ -3546,7 +3685,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // After the first frame, for the same reason the sources are — see `SparkleUpdater.start()`.
         // `apply(_:)` has already pushed the user's `automaticUpdateChecks` into it by now, so the
         // first update cycle runs on their answer rather than on the Info.plist default.
+        wireUpdateReminder()
         updater.start()
+        #if DEBUG
+        // `--update-demo`: the island as it looks when a scheduled check has found something, with
+        // this build's own notes — the only way to see the surface without publishing a release.
+        if ProcessInfo.processInfo.arguments.contains("--update-demo") {
+            offerUpdate(version: Self.updateDemoVersion, notesMarkdown: Self.updateDemoNotes)
+        }
+        #endif
         openIdleWindow()
 
         // `--export-logs <path>` writes the "Export Logs…" bundle there without the save panel and

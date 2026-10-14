@@ -134,7 +134,10 @@ public struct IslandRootView: View {
             // activity's own body slot, so the two cannot both decide they are drawing. It is one
             // property rather than this condition written out twice, which is how the player ended
             // up composited over the home page for a build.
-            if model.pagesOwnBody, let glance = model.glance {
+            // `drawsPagesBesideActivity` is the one case where a page is drawn while no page owns
+            // the body: a swipe over a call, a level or a meeting, where the activity's body is the
+            // thing being dragged away and the page it is heading for has to be really there.
+            if model.pagesOwnBody || model.drawsPagesBesideActivity, let glance = model.glance {
                 // **The mask hangs on this container, not on the page**, and that is what keeps a
                 // sliding page inside the island. `.mask` is positioned by layout, and a transition
                 // applied to the same view carries the mask along with it — so the outline
@@ -162,20 +165,30 @@ public struct IslandRootView: View {
                     // built — which is what a two-page carousel is, and costs nothing that the
                     // three-page one did not already: only the one being dragged toward is ever on
                     // screen. See `IslandPageRoster`.
-                    if model.swipe.isPaging, !glance.isShowingSchedule, model.presentedKind != .meeting {
-                        page(model.pageRoster.previous(before: model.currentPage), glance: glance)
+                    //
+                    // Over an activity's body the neighbours are the pages either side of where the
+                    // activity stands — home ahead, the last page behind — so a swipe from a call
+                    // arrives at the day rather than at a second copy of the call.
+                    if model.swipe.isPaging, !glance.isShowingSchedule {
+                        let neighbours = model.pageNeighbours
+                        page(neighbours.previous, glance: glance)
                             .offset(x: -model.swipe.pageSpan)
-                        page(model.pageRoster.next(after: model.currentPage), glance: glance)
+                        page(neighbours.next, glance: glance)
                             .offset(x: model.swipe.pageSpan)
                     }
 
                     Group {
                         if glance.isShowingSchedule {
                             GlanceScheduleLayerView(model: model, glance: glance, now: now)
-                        } else if model.presentedKind == .meeting {
-                            // A meeting keeps its own body wherever the user is: the whole point of the
-                            // kind is the Join button, and a page turn is not a reason to take it away.
+                        } else if model.drawsMeetingBody {
+                            // A meeting keeps its own body until somebody swipes from it: the whole
+                            // point of the kind is the Join button, and it is still in the flanks and
+                            // back on the next open once the pages have been turned to.
                             GlanceLayerView(model: model, glance: glance)
+                        } else if model.activityOwnsBody {
+                            // `ActivityLayerView` is drawing the activity's body and sliding it with
+                            // the finger; this layer is here only for the neighbours above.
+                            Color.clear
                         } else {
                             page(model.currentPage, glance: glance)
                         }
@@ -243,6 +256,16 @@ public struct IslandRootView: View {
                !model.isStowed,
                let dropHistory = model.dropHistory {
                 DropHistoryLayerView(model: model, history: dropHistory, now: now)
+                    .mask(islandMask)
+                    .transition(.opacity)
+            }
+
+            // The update on offer: the version, its release notes and the button that opens
+            // Sparkle's window. Slid by the swipe like the activity body it stands in for, so a swipe
+            // from it carries it off as the page arrives — see `drawsPagesBesideActivity`.
+            if model.drawsUpdateBody, let update = model.softwareUpdate {
+                UpdateAvailableLayerView(model: model, update: update)
+                    .modifier(SwipeOffsetEffect(swipe: model.swipe))
                     .mask(islandMask)
                     .transition(.opacity)
             }
@@ -336,7 +359,8 @@ public struct IslandRootView: View {
     /// because nothing outside this view asks the question.
     private func pageIdentity(glance: GlanceModel) -> String {
         if glance.isShowingSchedule { return "schedule" }
-        if model.presentedKind == .meeting { return "meeting" }
+        if model.drawsMeetingBody { return "meeting" }
+        if model.activityOwnsBody { return "activity" }
         return model.currentPage.rawValue
     }
 

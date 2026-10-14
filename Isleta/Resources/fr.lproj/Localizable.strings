@@ -92,3 +92,7 @@
 "onboarding.payoff.volume" = "Volume";
 "onboarding.payoff.brightness" = "Luminosité";
 "onboarding.payoff.mediaKeys" = "Touches multimédias";
+
+/* An update waiting */
+"sources.updateAvailable.title" = "Mises à jour";
+"sources.updateAvailable.summary" = "Indique quand une nouvelle version d’Isleta est prête à être installée.";

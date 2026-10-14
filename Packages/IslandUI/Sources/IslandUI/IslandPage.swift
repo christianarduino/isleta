@@ -168,6 +168,19 @@ public struct IslandPageRoster: Equatable, Sendable {
     /// Home rather than the nearest survivor, because there is no nearest: a page that is gone has
     /// no position to be near, and home is where the island opens.
     public func resolved(_ page: IslandPage) -> IslandPage { contains(page) ? page : .home }
+
+    /// The page `steps` along from an **activity** that has the body — a call, a volume level, a
+    /// meeting — rather than from a page.
+    ///
+    /// The activity is not a page and never joins the roster, but a swipe over it still has to land
+    /// somewhere, and where it lands is the carousel read as if the activity stood just before home:
+    /// one forward is home, one back is the last page. So a call answers a swipe with the day, the
+    /// player and the weather in the order the dots already draw them, and not with a second copy of
+    /// the call — which is what turning `current` underneath an activity's own body produced.
+    public func stepped(fromActivityBy steps: Int) -> IslandPage {
+        guard steps != 0 else { return .home }
+        return stepped(from: .home, by: steps > 0 ? steps - 1 : steps)
+    }
 }
 
 /// Which page the open island is on.
@@ -322,6 +335,42 @@ public final class IslandPageModel {
     /// What the shell asks before a turn, to size the island for the page arriving.
     public func page(steppedBy steps: Int) -> IslandPage {
         roster.stepped(from: current, by: steps)
+    }
+
+    // MARK: - In front of an activity
+
+    /// Whether the user has swiped from an activity that brought its own body onto the pages.
+    ///
+    /// An activity that *arrived* — a call, a volume level, a meeting about to start — keeps the
+    /// body it brought, and the pages stand down for it (`IslandScreenModel.activityOwnsBody`). But
+    /// a swipe on that open island is somebody asking for the pages, and the activity has already
+    /// said its piece: it is still on stage and still in the flanks, so nothing is lost by the body
+    /// going to the page they asked for.
+    ///
+    /// Cleared when the island closes and when a *different* activity takes the stage, so the next
+    /// thing to arrive is shown rather than covered. Not cleared by the activity updating — a call
+    /// ticks every second, and a timer would otherwise snatch the body back while it is being read.
+    public private(set) var isCoveringActivity = false
+
+    /// Turns from an activity's body onto `page`, which the pages then own until the island closes.
+    ///
+    /// Separate from `go(to:)` because the page may already be `current` — the island opened on
+    /// home, a call arrived, and the swipe forward from the call lands on home again — and that is
+    /// still a turn: the body changes from the call to the day.
+    public func turnFromActivity(to page: IslandPage) {
+        isCoveringActivity = true
+        guard roster.contains(page) else { return }
+        if page == current {
+            showIndicator()
+        } else {
+            arrive(at: page)
+        }
+    }
+
+    /// Gives the body back to whatever activity is on stage. See `isCoveringActivity`.
+    public func uncoverActivity() {
+        guard isCoveringActivity else { return }
+        isCoveringActivity = false
     }
 
     /// The fewest signed steps from the page showing to `page`, wrapping. What gives a dot's jump a
@@ -484,6 +533,8 @@ public final class IslandPageModel {
         // next time there is one. Correcting `rememberedPage` here would make one quiet evening
         // enough to forget where they live.
         current = pageAfterReset
+        // The next open shows whatever is on stage, not the pages somebody swiped to over it.
+        isCoveringActivity = false
         refreshRoster()
         // The dots go with the island rather than fading inside a shape that is no longer drawn —
         // and, more to the point, so that the next open is their next appearance.

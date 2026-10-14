@@ -335,10 +335,23 @@ final class SourceHub {
         // once for every app on the machine. `CalendarSource` is no longer given it: the day and
         // the sky are drawn by the pages now, and `GlanceModel` holds the unit they read.
         let unit = TemperatureUnit.fromLocale()
-        weather.apply(
-            placeSource: settings.usesCurrentLocation ? .currentLocation : .city(settings.city),
-            unit: unit
-        )
+        glanceSettings = settings
+        weather.apply(placeSource: Self.weatherPlace(for: settings, access: placeResolver.access), unit: unit)
+        // A grant or a revocation can change which place that is, so it is asked again then. Set
+        // here rather than at init because it is the record this needs, and this is where it lands.
+        weather.onLocationAccessChange = { [weak self] access in
+            guard let self, let settings = self.glanceSettings else { return }
+            self.weather.apply(placeSource: Self.weatherPlace(for: settings, access: access), unit: unit)
+        }
+    }
+
+    /// The last glance record applied, so a change in location access can re-pick the place.
+    private var glanceSettings: GlanceSettings?
+
+    /// Where the weather is asked about: **the same answer the Glance pane draws** — see
+    /// `GlanceSettings.followsLocation(given:)`, which both of them ask.
+    nonisolated static func weatherPlace(for settings: GlanceSettings, access: LocationAccess) -> WeatherPlaceSource {
+        settings.followsLocation(given: access) ? .currentLocation : .city(settings.city)
     }
 
     /// What the Glance settings pane draws, read live.
@@ -975,7 +988,7 @@ final class SourceHub {
         case .calendarAlert, .meeting, .fileAction,
              .focusChanged, .screenSharing:
             fallthrough
-        case .welcomeBack, .timer, .shelf:
+        case .welcomeBack, .timer, .shelf, .updateAvailable:
             return Self.status(from: entry.source.authorization,
                                working: appText("sources.status.workingNoPermission",
                                                 "Working. Needs no permission."))
@@ -1075,7 +1088,7 @@ final class SourceHub {
             // file that gets emailed to strangers. This flag is the one thing a bug report needs —
             // "the ring never appears" and "nothing appears at all" are different reports.
             return "battery \(bluetooth.reportsBattery ? "readable" : "unreadable")"
-        case .welcomeBack, .shelf:
+        case .welcomeBack, .shelf, .updateAvailable:
             return nil
         case .power:
             // Whether there is a battery at all, and how many moments have been shown. Never the
@@ -1108,6 +1121,7 @@ final class SourceHub {
         case .fileAction: appText("sources.fileAction.title", "Drop actions")
         case .focusChanged: appText("sources.focusChanged.title", "Focus changes")
         case .screenSharing: appText("sources.screenSharing.title", "Screen sharing")
+        case .updateAvailable: appText("sources.updateAvailable.title", "Updates")
         }
     }
 
@@ -1203,6 +1217,11 @@ final class SourceHub {
             appText(
                 "sources.screenSharing.summary",
                 "Reminds you while your screen is being recorded or shared."
+            )
+        case .updateAvailable:
+            appText(
+                "sources.updateAvailable.summary",
+                "Shows when a new version of Isleta is ready to install."
             )
         }
     }

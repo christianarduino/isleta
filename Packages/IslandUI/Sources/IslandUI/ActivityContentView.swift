@@ -458,6 +458,22 @@ public struct ActivityContentView: View {
                     height: size * ApplicationIconMetrics.canvasScale
                 )
                 .contentTransition(.opacity)
+                .overlay(alignment: .bottomTrailing) {
+                    if let badge = content.badgeSymbol {
+                        // On a black disc so it reads against any icon, and pulled in by the icon's
+                        // transparent margin so it sits on the shape rather than in the air beside it.
+                        Image(systemName: badge)
+                            .font(.system(size: size * 0.5, weight: .bold))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(
+                                ActivityPalette.color(for: .neutral, increaseContrast: increaseContrast),
+                                ActivityPalette.color(for: .accent, increaseContrast: increaseContrast)
+                            )
+                            .background(Circle().fill(Color(.sRGB, red: 0, green: 0, blue: 0, opacity: 1)).padding(-1))
+                            .offset(x: -size * 0.04, y: -size * 0.04)
+                            .accessibilityHidden(true)
+                    }
+                }
             if matched, let namespace {
                 image.matchedGeometryEffect(id: Self.symbolGeometryID, in: namespace)
             } else {

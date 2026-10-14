@@ -731,6 +731,13 @@ Never invent a symbol.
   for a further ~130ms. So the first ask for any track a user skips to comes back empty, always. The
   re-ask has to be on its own clock — see `NowPlayingArtworkLoader.retryingIdentity` for what
   happens when it is left to the stream instead.
+- **A one-shot adapter run needs a deadline that ends in SIGKILL.** A helper wedged inside a
+  MediaRemote call does not honor SIGTERM (`NowPlayingAdapterReader` escalates for that reason), and
+  the artwork and format reads block on the pipe until the writer dies — so a SIGTERM-only deadline
+  could hold the artwork's serial queue for the rest of a session. Not reproduced on demand
+  (2026-10-14, macOS 27.0.1: a healthy `get` answers in ~30 ms with ~154 KB of cover); found by
+  reading the code against a report of covers missing only in long-running instances. Both reads now
+  go through `NowPlayingOneShot`, and a kill is logged as a warning.
 - **The AppleScript fallback is push, not poll.** Music and Spotify post `playerInfo` distributed
   notifications carrying player state, name, artist and album — no permission, no polling. Scripting
   is needed only for the *initial* snapshot, because the notification fires on change. Re-running a

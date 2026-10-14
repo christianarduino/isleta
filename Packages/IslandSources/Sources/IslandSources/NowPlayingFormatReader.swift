@@ -92,43 +92,14 @@ public final class NowPlayingFormatReader {
         timeout: TimeInterval,
         byteLimit: Int
     ) -> AudioFormat? {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = pipe
-        // stderr to /dev/null rather than to a pipe nobody drains — an undrained stderr pipe fills
-        // and blocks the writer, which hangs the helper rather than letting it exit.
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        // The deadline is armed before the read, because `availableData` blocks on a writer that
-        // may never close.
-        let boxed = UncheckedBox(process)
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
-            guard boxed.value.isRunning else { return }
-            boxed.value.terminate()
-        }
-
-        var data = Data()
-        let handle = pipe.fileHandleForReading
-        while data.count < byteLimit {
-            let chunk = handle.availableData
-            if chunk.isEmpty { break }
-            data.append(chunk)
-        }
-        if data.count >= byteLimit {
-            if process.isRunning { process.terminate() }
-            return nil
-        }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
+        // `NowPlayingOneShot`, for its SIGKILL: a SIGTERM-only deadline left a wedged helper holding
+        // a cooperative-pool thread in `availableData` for the life of the app.
+        guard case .output(let data) = NowPlayingOneShot.run(
+            executable: executable,
+            arguments: arguments,
+            byteLimit: byteLimit,
+            timeout: timeout
+        ) else { return nil }
 
         return decodeFormat(fromQueuePayload: data)
     }

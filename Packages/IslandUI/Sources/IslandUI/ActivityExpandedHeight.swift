@@ -266,6 +266,8 @@ extension ActivityKind {
         // `NowPlayingExpandedLayout` carries: agree a height and hold it, because
         // `IslandController.expandedContentHeight` is read *before* the transition.
         case .glance, .call, .fileAction: false
+        // The release notes and the button under them, sized by `UpdateAvailableLayout`.
+        case .updateAvailable: false
         // Everything else is a title, a subtitle and at most a value — which is exactly what the
         // generic measurement was written for.
         case .systemHUD, .welcomeBack, .timer: true

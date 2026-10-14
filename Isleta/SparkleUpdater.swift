@@ -48,6 +48,17 @@ final class SparkleUpdater: NSObject, SoftwareUpdater, SPUUpdaterDelegate, SPUSt
     /// `SettingsStore.loadFailure` exists to avoid.
     private(set) var startFailure: String?
 
+    /// A scheduled check found an update, and the island is to show it rather than Sparkle's
+    /// window: the version as Sparkle displays it, and the notes embedded in the appcast.
+    ///
+    /// **Scheduled checks only.** A check the user asked for — "Check for Updates…" — still goes
+    /// straight to Sparkle's window, because they are already looking for the answer.
+    var onUpdateAvailable: ((_ version: String, _ notesMarkdown: String?) -> Void)?
+
+    /// The update has been looked at in Sparkle's window, or its session ended — the island's
+    /// reminder has done its job.
+    var onUpdateAttended: (() -> Void)?
+
     /// - Parameter automaticallyChecksForUpdates: the shipped default, overwritten by the stored
     ///   configuration before `start()` in every real launch.
     init(automaticallyChecksForUpdates: Bool = true) {
@@ -143,8 +154,18 @@ final class SparkleUpdater: NSObject, SoftwareUpdater, SPUUpdaterDelegate, SPUSt
     /// ask for — which is the case `checkForUpdates()` cannot cover, because nobody is there to have
     /// clicked anything.
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        // No activation here any more. For a scheduled check this used to pull Isleta frontmost
+        // for a window it was not going to show; the island is the reminder now, and a check the
+        // user asked for is activated in `checkForUpdates()` before it starts.
         IslandLog.updates.info("update available: \(item.displayVersionString)")
-        activateForUpdateUI()
+    }
+
+    /// Brings the update Sparkle is holding into its window — what the island's button does.
+    ///
+    /// The header's own advice for a gentle reminder: `checkForUpdates()` on an updater that has
+    /// already found one shows that update in focus rather than checking again.
+    func showUpdate() {
+        checkForUpdates()
     }
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
@@ -156,6 +177,30 @@ final class SparkleUpdater: NSObject, SoftwareUpdater, SPUUpdaterDelegate, SPUSt
     }
 
     // MARK: - SPUStandardUserDriverDelegate
+
+    /// Gentle reminders: Sparkle finds the update, and the island says so.
+    ///
+    /// An `LSUIElement` app is exactly the case Sparkle's documentation names for this. Without it a
+    /// scheduled check that finds something puts Sparkle's window up behind whatever the user is
+    /// doing, from an app with no Dock icon to explain where it came from.
+    nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem,
+        andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        // The island handles every scheduled one. A build with nothing to hand it to says yes, so
+        // an update is never found and then shown nowhere.
+        MainActor.assumeIsolated { onUpdateAvailable == nil }
+    }
+
+    nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        MainActor.assumeIsolated { onUpdateAttended?() }
+    }
+
+    nonisolated func standardUserDriverWillFinishUpdateSession() {
+        MainActor.assumeIsolated { onUpdateAttended?() }
+    }
 
     /// `nonisolated` because `SPUStandardUserDriverDelegate` is the one Sparkle protocol in this
     /// file that is *not* declared `NS_SWIFT_UI_ACTOR`, so a `@MainActor` conformance will not
@@ -173,7 +218,17 @@ final class SparkleUpdater: NSObject, SoftwareUpdater, SPUUpdaterDelegate, SPUSt
         forUpdate update: SUAppcastItem,
         state: SPUUserUpdateState
     ) {
-        guard handleShowingUpdate else { return }
-        MainActor.assumeIsolated { activateForUpdateUI() }
+        let version = update.displayVersionString
+        let notes = update.itemDescriptionFormat == "markdown" ? update.itemDescription : nil
+        MainActor.assumeIsolated {
+            guard handleShowingUpdate else {
+                // Ours to show. The notes are taken only when they are the Markdown the release
+                // script embeds; HTML from some other feed would draw as tags.
+                IslandLog.updates.info("update \(version) handed to the island")
+                onUpdateAvailable?(version, notes)
+                return
+            }
+            activateForUpdateUI()
+        }
     }
 }

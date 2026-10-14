@@ -425,6 +425,19 @@ public final class IslandScreenModel {
     /// here — two spellings of one state is the bug this codebase refuses everywhere else.
     public var isShowingDropHistory: Bool { dropHistory?.isShowing ?? false }
 
+    /// The update on offer, if any — one app-wide model, pushed in like `dropHistory`. Nil on a
+    /// build with no updater.
+    public var softwareUpdate: UpdateAvailableModel?
+
+    /// Whether the open island is showing the update surface: the update is on stage and still has
+    /// the body, nobody has swiped from it to the pages, and nothing drilled-into is covering it.
+    public var drawsUpdateBody: Bool {
+        contentPresentation == .expanded && !isStowed
+            && presentedKind == .updateAvailable && activityOwnsBody
+            && !isShowingNowPlayingQueue && !isShowingDropHistory
+            && softwareUpdate?.isOffering == true
+    }
+
     /// Puts the drop history up or takes it away.
     ///
     /// `setShowingNowPlayingQueue`'s shape exactly, and the flag lives on `DropHistoryModel` for
@@ -575,9 +588,43 @@ public final class IslandScreenModel {
         // The schedule is a drill-down from home rather than a page, and it covers the body.
         if glance.isShowingSchedule { return true }
         // A meeting keeps its own body wherever the user is — and draws it through
-        // `GlanceLayerView` rather than through the slot machinery, so it owns the body too.
-        if presentedKind == .meeting { return true }
+        // `GlanceLayerView` rather than through the slot machinery, so it owns the body too —
+        // until somebody swipes from it to the pages.
+        if drawsMeetingBody { return true }
         return drawsPages
+    }
+
+    /// Whether the meeting on stage is drawing its own body, through `GlanceLayerView`.
+    public var drawsMeetingBody: Bool { presentedKind == .meeting && activityOwnsBody }
+
+    /// Whether the activity on stage brought a body of its own and is still showing it.
+    ///
+    /// True for every kind but the ones the pages are *about* (see `drawsPages`) — until the user
+    /// swipes, at which point the pages stand in front of it (`IslandPageModel.isCoveringActivity`)
+    /// and this is false until the island closes or something new arrives.
+    public var activityOwnsBody: Bool {
+        guard page?.isCoveringActivity != true else { return false }
+        switch presentedKind {
+        case nil, .glance, .nowPlaying: return false
+        default: return true
+        }
+    }
+
+    /// Whether a swipe that started over an activity's body is live, so the pages either side of
+    /// it have to be drawn even though no page owns the body yet.
+    public var drawsPagesBesideActivity: Bool {
+        contentPresentation == .expanded && !isStowed && swipe.isPaging && activityOwnsBody
+            && !isShowingNowPlayingQueue && !isShowingDropHistory && glance != nil
+    }
+
+    /// The two pages a live swipe is dragging between: the roster's neighbours of the current page,
+    /// or — over an activity's body — the pages either side of where that activity stands, which is
+    /// just before home. See `IslandPageRoster.stepped(fromActivityBy:)`.
+    public var pageNeighbours: (previous: IslandPage, next: IslandPage) {
+        if activityOwnsBody {
+            return (pageRoster.stepped(fromActivityBy: -1), pageRoster.stepped(fromActivityBy: 1))
+        }
+        return (pageRoster.previous(before: currentPage), pageRoster.next(after: currentPage))
     }
 
     /// Whether the open island is showing a **page** rather than an activity's own body.
@@ -602,9 +649,11 @@ public final class IslandScreenModel {
     /// handled separately in `IslandRootView` because it draws through `GlanceLayerView` rather than
     /// through the slot machinery.
     public var drawsPages: Bool {
+        // A swipe from an activity's body hands the body to the pages — see `activityOwnsBody`.
+        if page?.isCoveringActivity == true { return true }
         switch presentedKind {
-        case nil, .glance, .nowPlaying: true
-        default: false
+        case nil, .glance, .nowPlaying: return true
+        default: return false
         }
     }
 
@@ -1281,7 +1330,9 @@ public final class IslandScreenModel {
     nonisolated static func arrivesLikeTheUnlock(_ change: ActivityChange, stage: ActivityStage?) -> Bool {
         guard case .presented = change, let stage else { return false }
         switch stage.primary.kind {
-        case .nowPlaying, .deviceConnected: return true
+        // An update is the same picture as a device: an icon in one sliver and a round glyph in
+        // the other, both things rather than words.
+        case .nowPlaying, .deviceConnected, .updateAvailable: return true
         case .systemHUD, .welcomeBack, .shelf, .timer, .glance, .calendarAlert, .meeting,
              .power, .call, .fileAction, .focusChanged, .screenSharing:
             return false

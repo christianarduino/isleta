@@ -73,8 +73,33 @@ public final class WeatherSource {
     /// Whether the "a reading arrived" line has been written since the last `start()`.
     private var hasLoggedFirstReading = false
 
-    /// The refresh in flight, so a settings change that arrives mid-fetch does not start a second.
+    /// The refresh in flight, so a second ask for the same place does not start a second fetch.
     private var inFlight: Task<Void, Never>?
+
+    /// The place the refresh in flight is asking about.
+    ///
+    /// **A different place supersedes it rather than waiting behind it.** The guard used to be on
+    /// `inFlight` alone, so a city typed while a fetch for the old place was still out was simply
+    /// dropped: the stale fetch failed or answered for the wrong place, and nothing asked again for
+    /// fifteen minutes. A city is typed a letter at a time, so this was the ordinary case.
+    private var inFlightSource: WeatherPlaceSource?
+
+    /// A refresh waiting for the user to stop typing. See `cityEntryPause`.
+    private var pendingRefresh: Task<Void, Never>?
+
+    /// How long a typed city has to sit still before it is geocoded.
+    ///
+    /// Every keystroke in the City field is a settings change, and geocoding each prefix of "London"
+    /// is six requests to a rate-limited service for five places nobody asked about. Short enough
+    /// that the reading still arrives while the person is looking for it.
+    static let cityEntryPause: Duration = .milliseconds(600)
+
+    /// Told when location access changes, before the source refreshes on it.
+    ///
+    /// The place the shell picks depends on the grant — "Use my location" is only on while it is
+    /// usable, which is how the Glance pane draws it — so a grant arriving has to be able to change
+    /// the place, not just re-ask about the old one.
+    public var onLocationAccessChange: ((LocationAccess) -> Void)?
 
     public init(
         provider: any WeatherProvider = WeatherKitProvider.resolve(),
@@ -116,7 +141,10 @@ public final class WeatherSource {
         // The grant is the trigger, not a poll. `LocationAccess` moving to usable means a place that
         // could not be resolved a second ago now can, and the person who just answered the dialog is
         // looking at the island waiting for it.
-        resolver.onAccessChange = { [weak self] _ in self?.refreshNow() }
+        resolver.onAccessChange = { [weak self] access in
+            self?.onLocationAccessChange?(access)
+            self?.refreshNow()
+        }
         retune()
     }
 
@@ -130,6 +158,9 @@ public final class WeatherSource {
         refresh = nil
         inFlight?.cancel()
         inFlight = nil
+        inFlightSource = nil
+        pendingRefresh?.cancel()
+        pendingRefresh = nil
         // The reading goes with it. Leaving it would let a glance summoned after the source was
         // switched off draw a temperature nothing is maintaining.
         guard reading != nil else { return }
@@ -167,16 +198,36 @@ public final class WeatherSource {
             onReading?(reading)
             return
         }
-        refreshNow()
+        pendingRefresh?.cancel()
+        pendingRefresh = nil
+        guard case .city = placeSource else {
+            refreshNow()
+            return
+        }
+        pendingRefresh = Task { [weak self] in
+            try? await Task.sleep(for: Self.cityEntryPause)
+            guard !Task.isCancelled, let self else { return }
+            self.pendingRefresh = nil
+            self.refreshNow()
+        }
     }
 
     /// Ask now. Called on presentation, on a settings change, and from `--glance-demo`.
     public func refreshNow() {
         guard isRunning, provider.isAvailable else { return }
-        guard inFlight == nil else { return }
+        // Asking now answers whatever a typed city was waiting to ask.
+        pendingRefresh?.cancel()
+        pendingRefresh = nil
+        let source = self.placeSource
+        if inFlight != nil {
+            guard inFlightSource != source else { return }
+            // Asking about a place nobody wants any more. Cancelled rather than awaited: the task
+            // checks for cancellation before it publishes, so its answer cannot land over this one.
+            inFlight?.cancel()
+        }
         let provider = self.provider
         let resolver = self.resolver
-        let source = self.placeSource
+        inFlightSource = source
         inFlight = Task { [weak self] in
             let outcome: Result<WeatherReading, any Error>
             do {
@@ -187,6 +238,7 @@ public final class WeatherSource {
             }
             guard let self, !Task.isCancelled else { return }
             self.inFlight = nil
+            self.inFlightSource = nil
             switch outcome {
             case .success(let reading):
                 // Counts and outcomes only. **Never the coordinate and never the place name** —

@@ -148,3 +148,12 @@
 
 "lockScreen.locked" = "Bloqueado";
 "lockScreen.unlocked" = "Desbloqueado";
+
+/* An update waiting */
+"activityKind.updateAvailable" = "Actualización";
+"update.header" = "Isleta %@ está disponible";
+"update.whatsNew" = "Novedades";
+"update.noNotes" = "Esta actualización no tiene notas de la versión.";
+"update.install" = "Instalar actualización…";
+"update.install.a11y" = "Instalar la actualización";
+"update.install.help" = "Cierra la isla y abre la ventana de actualización, donde puedes instalarla y reiniciar Isleta.";

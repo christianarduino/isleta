@@ -169,3 +169,19 @@ struct GlanceSettingsStateTests {
         #expect(denied.weatherSummary.contains("city"))
     }
 }
+
+@Suite("Whether the weather follows the Mac's location")
+struct GlanceFollowsLocationTests {
+
+    @Test("the switch counts only while the grant is there")
+    func followsOnlyWithTheGrant() {
+        // The reported bug: the grant had been reset, the pane drew the switch off and a city in the
+        // field, and the weather kept asking CoreLocation — "Weather not available right now".
+        let wantsLocation = GlanceSettings(usesCurrentLocation: true, city: "London")
+        #expect(wantsLocation.followsLocation(given: .granted))
+        #expect(!wantsLocation.followsLocation(given: .notDetermined))
+        #expect(!wantsLocation.followsLocation(given: .denied))
+        #expect(!wantsLocation.followsLocation(given: .restricted))
+        #expect(!GlanceSettings(usesCurrentLocation: false, city: "London").followsLocation(given: .granted))
+    }
+}

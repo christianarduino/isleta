@@ -195,6 +195,63 @@ struct ArtworkIdentityTests {
         #expect(NowPlayingArtworkLoader.maximumAttempts >= 2)
         #expect(NowPlayingArtworkLoader.maximumAttempts <= 5)
     }
+
+    @Test("a cover that is slow to arrive is asked about again later, and then left alone")
+    func lateReAsksAreBounded() {
+        // Quick asks for a skip, then slower ones for a cover the player has to fetch, then nothing:
+        // the well's placeholder is the honest answer for a track that has no cover at all.
+        let quick = (1..<NowPlayingArtworkLoader.maximumAttempts).map {
+            NowPlayingArtworkLoader.reAskDelay(afterAttempt: $0)
+        }
+        #expect(quick.allSatisfy { $0 == NowPlayingArtworkLoader.retryDelay })
+
+        let first = NowPlayingArtworkLoader.maximumAttempts
+        let late = NowPlayingArtworkLoader.lateReAskDelays.indices.map {
+            NowPlayingArtworkLoader.reAskDelay(afterAttempt: first + $0)
+        }
+        #expect(late == NowPlayingArtworkLoader.lateReAskDelays.map { Optional($0) })
+        #expect(late.allSatisfy { ($0 ?? .zero) >= .seconds(1) })
+
+        let spent = first + NowPlayingArtworkLoader.lateReAskDelays.count
+        #expect(NowPlayingArtworkLoader.reAskDelay(afterAttempt: spent) == nil)
+    }
+}
+
+@Suite("A one-shot helper that will not die")
+struct NowPlayingOneShotTests {
+
+    @Test("a helper that ignores SIGTERM is killed, so the read returns")
+    func wedgedHelperIsKilled() {
+        // The shape of a `get` wedged inside MediaRemote: it never writes, never closes its pipe and
+        // shrugs off the polite signal. A SIGTERM-only deadline blocked the artwork queue for good.
+        let started = Date()
+        let outcome = NowPlayingOneShot.run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "trap '' TERM; exec sleep 30"],
+            byteLimit: 1024,
+            timeout: 0.3
+        )
+        guard case .timedOut = outcome else {
+            Issue.record("expected the helper to be killed, got \(outcome)")
+            return
+        }
+        #expect(Date().timeIntervalSince(started) < 5)
+    }
+
+    @Test("a helper that answers is read in full")
+    func answeringHelperIsRead() {
+        let outcome = NowPlayingOneShot.run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf '{}'"],
+            byteLimit: 1024,
+            timeout: 2
+        )
+        guard case .output(let data) = outcome else {
+            Issue.record("expected output, got \(outcome)")
+            return
+        }
+        #expect(data == Data("{}".utf8))
+    }
 }
 
 @Suite("Where the artwork key came from")

@@ -94,6 +94,15 @@ final class SwipeController {
 
     private let scrollDropHistory: @MainActor (IslandScrollSample) -> Void
 
+    /// The update's release notes: whether they are on screen, and how to scroll them.
+    ///
+    /// **Only the vertical half of the gesture.** Up Next and the drop history own both axes; the
+    /// update is an activity, and a horizontal swipe over it is still the request for the pages
+    /// that `IslandPageModel.isCoveringActivity` answers. So a sample that is mostly vertical
+    /// scrolls the notes and goes no further, and anything else carries on to the carousel.
+    private let isShowingUpdateNotes: @MainActor () -> Bool
+    private let scrollUpdateNotes: @MainActor (IslandScrollSample) -> Void
+
     /// Diagnostics for the debug overlay and the self-test: what the last sample did.
     private(set) var lastOutcome: SwipeTracker.Outcome = .ignored
     private(set) var sampleCount = 0
@@ -116,7 +125,9 @@ final class SwipeController {
         commitPageDrag: @escaping @MainActor (Int) -> Void = { _ in },
         settlePageDrag: @escaping @MainActor () -> Void = {},
         setTurnDirection: @escaping @MainActor (Int) -> Void = { _ in },
-        scrollDropHistory: @escaping @MainActor (IslandScrollSample) -> Void = { _ in }
+        scrollDropHistory: @escaping @MainActor (IslandScrollSample) -> Void = { _ in },
+        isShowingUpdateNotes: @escaping @MainActor () -> Bool = { false },
+        scrollUpdateNotes: @escaping @MainActor (IslandScrollSample) -> Void = { _ in }
     ) {
         self.activities = activities
         self.swipeModels = swipeModels
@@ -136,6 +147,8 @@ final class SwipeController {
         self.settlePageDrag = settlePageDrag
         self.setTurnDirection = setTurnDirection
         self.scrollDropHistory = scrollDropHistory
+        self.isShowingUpdateNotes = isShowingUpdateNotes
+        self.scrollUpdateNotes = scrollUpdateNotes
     }
 
     func handle(_ sample: IslandScrollSample) {
@@ -197,6 +210,15 @@ final class SwipeController {
         // designed to avoid rather than to win. The clause that has to stay is the condition — the
         // shelf carries no exits of its own, so a shelf whose files all fit gives the axis back and
         // stays closable with a flick. See `ShelfController.canScroll`.
+        // Not while a page is being dragged: a turn's momentum tail can drift vertical, and handing
+        // it to the notes would strand the carousel halfway across.
+        if expanded, isShowingUpdateNotes(), abs(sample.deltaY) > abs(sample.deltaX),
+           !swipeModels().contains(where: \.isPaging) {
+            _ = closeGesture.consume(sample, isExpanded: false)
+            scrollUpdateNotes(sample)
+            return
+        }
+
         if expanded, canScrollShelf() {
             _ = closeGesture.consume(sample, isExpanded: false)
             scrollShelf(sample)

@@ -38,6 +38,10 @@ struct BuiltInActivityTests {
             // answer. The glance is here for the reason the recents list keeps its ground: it is
             // read, not glanced at.
             #expect(activity.expiry == .never)
+        case .updateAvailable:
+            // Still available tomorrow. Sparkle retracts it once the update has been looked at; a
+            // reminder that lapsed on a clock would be no reminder.
+            #expect(activity.expiry == .never)
         case .calendarAlert, .meeting, .power, .focusChanged:
             // Four moments with nothing to retract them. The meeting is the one to watch: it is the
             // longest-lived of the group at 30s because it carries a *button*, and living long

@@ -216,6 +216,13 @@ public struct ActivityContent: Equatable, Sendable {
     /// abbreviations by design — "1:04" is right on screen and useless read aloud.
     public var accessibilityLabel: String?
 
+    /// A small SF Symbol worn on the bottom-right corner of the application icon — the update's
+    /// download mark on Isleta's own icon. Drawn only over an icon; a bare glyph has no corner.
+    ///
+    /// **Last, and it must stay last.** Inserting a stored property ahead of others shifts every
+    /// field after it for a dependent package built against the old layout (`docs/TRAPS.md`).
+    public var badgeSymbol: String?
+
     /// `symbolVariableValue` clamped into 0...1, or nil. What the renderer reads.
     public var symbolFill: Double? {
         symbolVariableValue.map { min(max($0, 0), 1) }
@@ -229,7 +236,8 @@ public struct ActivityContent: Equatable, Sendable {
         subtitle: String? = nil,
         value: ActivityValue? = nil,
         tint: ActivityTint = .neutral,
-        accessibilityLabel: String? = nil
+        accessibilityLabel: String? = nil,
+        badgeSymbol: String? = nil
     ) {
         self.symbol = symbol
         self.symbolVariableValue = symbolVariableValue
@@ -239,6 +247,7 @@ public struct ActivityContent: Equatable, Sendable {
         self.value = value
         self.tint = tint
         self.accessibilityLabel = accessibilityLabel
+        self.badgeSymbol = badgeSymbol
     }
 
     /// Nothing to draw. Distinct from "not supplied": an activity that deliberately shows nothing

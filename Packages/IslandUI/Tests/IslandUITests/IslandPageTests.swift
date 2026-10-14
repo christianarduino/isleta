@@ -389,3 +389,58 @@ struct IslandPageRosterTests {
         #expect(roster.resolved(.weather) == .weather)
     }
 }
+
+@Suite("Swiping from an activity onto the pages")
+@MainActor
+struct IslandPagesOverActivityTests {
+
+    @Test("from a call, forward is the day and back is the forecast")
+    func activityStandsBeforeHome() {
+        // The reported bug: a swipe over a call or a volume level turned up a second copy of it. The
+        // activity is read as standing just before home, so the pages arrive in the dots' order.
+        let roster = IslandPageRoster.all
+        #expect(roster.stepped(fromActivityBy: 1) == .home)
+        #expect(roster.stepped(fromActivityBy: 2) == .music)
+        #expect(roster.stepped(fromActivityBy: 3) == .weather)
+        #expect(roster.stepped(fromActivityBy: -1) == .weather)
+        #expect(roster.stepped(fromActivityBy: -2) == .music)
+    }
+
+    @Test("with nothing playing, the music page is skipped")
+    func musicOnlyWhenPlaying() {
+        let model = IslandPageModel()
+        model.setMusicAvailable(false)
+        #expect(model.roster.stepped(fromActivityBy: 1) == .home)
+        #expect(model.roster.stepped(fromActivityBy: 2) == .weather)
+        #expect(model.roster.stepped(fromActivityBy: -1) == .weather)
+    }
+
+    @Test("turning from an activity to the page already current still covers it")
+    func turningOntoTheCurrentPageCovers() {
+        let model = IslandPageModel()
+        #expect(!model.isCoveringActivity)
+        model.turnFromActivity(to: .home)
+        #expect(model.isCoveringActivity)
+        #expect(model.current == .home)
+        #expect(model.isIndicatorVisible)
+    }
+
+    @Test("turning from an activity lands on the page asked for")
+    func turningLands() {
+        let model = IslandPageModel()
+        model.turnFromActivity(to: .weather)
+        #expect(model.current == .weather)
+        #expect(model.isCoveringActivity)
+    }
+
+    @Test("closing the island gives the body back to the activity")
+    func resetUncovers() {
+        let model = IslandPageModel()
+        model.turnFromActivity(to: .music)
+        model.reset()
+        #expect(!model.isCoveringActivity)
+        model.turnFromActivity(to: .home)
+        model.uncoverActivity()
+        #expect(!model.isCoveringActivity)
+    }
+}

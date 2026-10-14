@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import IslandKit
 import UniformTypeIdentifiers
 
 /// One track's cover art, with the token that says which track it belongs to.
@@ -195,7 +196,7 @@ public final class NowPlayingArtworkLoader {
     /// Long enough for the player to have finished switching, short enough that the cover is not
     /// visibly late. The stream's own update usually beats this; it is the backstop for a track that
     /// then sits still and sends nothing more.
-    static let retryDelay: Duration = .milliseconds(350)
+    nonisolated static let retryDelay: Duration = .milliseconds(350)
 
     /// Attempts before a track is accepted as having no cover.
     ///
@@ -203,7 +204,17 @@ public final class NowPlayingArtworkLoader {
     /// With `retryDelay` that covers the ~700ms after a skip, against a measured ~130ms of the
     /// player naming the new track while still answering `get` with no `artworkData`. A cover that
     /// has not arrived by then is a track that has none, which is a state the well draws honestly.
-    static let maximumAttempts = 3
+    nonisolated static let maximumAttempts = 3
+
+    /// Two slower asks after the quick budget is spent, before a track is finally taken to have no
+    /// cover.
+    ///
+    /// The quick budget is sized for a skip, where the cover is ~130ms behind the title. It is not
+    /// sized for a cover the player has to *download* — a streamed track, or a library whose art is
+    /// not cached after a long session — and giving up at 700ms pinned the empty well for the whole
+    /// of a track whose cover turned up a second later, with nothing to ask again because a playing
+    /// track sends the stream nothing new. Two more spawns per coverless track, ~30ms each.
+    nonisolated static let lateReAskDelays: [Duration] = [.seconds(3), .seconds(10)]
 
     public init(
         location: NowPlayingAdapterLocation?,
@@ -319,12 +330,12 @@ public final class NowPlayingArtworkLoader {
                     if playerReported, let answered = fetched.identity, answered != identity {
                         let attempts = (self.attemptsByIdentity[identity] ?? 0) + 1
                         self.attemptsByIdentity[identity] = attempts
-                        if attempts < Self.maximumAttempts {
+                        if let delay = Self.reAskDelay(afterAttempt: attempts) {
                             // Ask again shortly. The player is mid-switch, not silent, so this
                             // converges in one or two goes — and without it nothing would ask again
                             // until the next stream update, which on a paused or steady track may
                             // never come.
-                            self.retry(identity: identity, playerReported: playerReported)
+                            self.retry(identity: identity, playerReported: playerReported, after: delay)
                         }
                         return
                     }
@@ -353,18 +364,20 @@ public final class NowPlayingArtworkLoader {
                     } else {
                         let attempts = (self.attemptsByIdentity[identity] ?? 0) + 1
                         self.attemptsByIdentity[identity] = attempts
-                        if attempts >= Self.maximumAttempts {
-                            // Give up on this track, and say so by retiring the identity — the well
-                            // with its glyph is the honest answer for a track that has no cover.
-                            self.resolvedIdentity = identity
-                        } else {
+                        if let delay = Self.reAskDelay(afterAttempt: attempts) {
                             // Ask again on our own clock rather than waiting for the next stream
                             // update. Measured: after a skip the player names the new track
                             // immediately but answers `get` with no `artworkData` for ~130ms, so the
                             // first ask is empty for every track a user skips to. Leaving the re-ask
                             // to the stream meant it only happened while something else was
                             // changing — which, on a track that then sits still, is never.
-                            self.retry(identity: identity, playerReported: playerReported)
+                            self.retry(identity: identity, playerReported: playerReported, after: delay)
+                        } else {
+                            // Give up on this track, and say so by retiring the identity — the well
+                            // with its glyph is the honest answer for a track that has no cover.
+                            // Once per track, and the only trace a missing cover leaves.
+                            self.resolvedIdentity = identity
+                            IslandLog.nowPlaying.info("artwork: none after \(attempts) asks — showing the placeholder")
                         }
                         // Deliberately no `onArtwork` call: there is nothing new to say, and
                         // publishing nil here would blank a cover we may already be showing for
@@ -420,6 +433,15 @@ public final class NowPlayingArtworkLoader {
         return .ask
     }
 
+    /// How long to wait before the next ask, after `attempt` came back without a cover — or nil when
+    /// the budget is spent. The quick asks first, then the late ones. Pure, so the schedule is tested
+    /// without spawning anything.
+    nonisolated static func reAskDelay(afterAttempt attempt: Int) -> Duration? {
+        if attempt < maximumAttempts { return retryDelay }
+        let late = attempt - maximumAttempts
+        return late < lateReAskDelays.count ? lateReAskDelays[late] : nil
+    }
+
     private func cancelReAsk() {
         retryTask?.cancel()
         retryTask = nil
@@ -431,11 +453,11 @@ public final class NowPlayingArtworkLoader {
     /// `playerReported` is carried through rather than defaulted: the answer-names-a-different-track
     /// check is only meaningful for the player's own identifier, and dropping the flag on the re-ask
     /// would make the second attempt accept the cover the first one rejected.
-    private func retry(identity: String, playerReported: Bool) {
+    private func retry(identity: String, playerReported: Bool, after delay: Duration = retryDelay) {
         retryTask?.cancel()
         retryingIdentity = identity
         retryTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.retryDelay)
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
             self.retryingIdentity = nil
             self.load(identity: identity, playerReported: playerReported)
@@ -472,46 +494,14 @@ public final class NowPlayingArtworkLoader {
     ) -> FetchedArtwork {
         guard !arguments.isEmpty else { return FetchedArtwork(image: nil, identity: nil) }
 
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = pipe
-        // stderr to /dev/null rather than to a pipe nobody drains. An undrained stderr pipe fills
-        // and blocks the writer, so a chatty helper would hang here instead of exiting — the exact
-        // failure the streaming reader documents, arriving through a different door.
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return FetchedArtwork(image: nil, identity: nil)
-        }
-
-        // Deadline before the read, not after: `readDataToEndOfFile` blocks until the writer closes
-        // the pipe, so a helper that never exits would park this queue for the life of the app.
-        let boxed = UncheckedBox(process)
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
-            guard boxed.value.isRunning else { return }
-            boxed.value.terminate()
-        }
-
-        var data = Data()
-        let handle = pipe.fileHandleForReading
-        while data.count < byteLimit {
-            let chunk = handle.availableData
-            if chunk.isEmpty { break }
-            data.append(chunk)
-        }
-        if data.count >= byteLimit {
-            // Over the cap: stop reading, and kill the writer rather than leaving it blocked on a
-            // pipe nobody is emptying.
-            if process.isRunning { process.terminate() }
-            return FetchedArtwork(image: nil, identity: nil)
-        }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return FetchedArtwork(image: nil, identity: nil) }
+        // Through `NowPlayingOneShot`, whose deadline ends in SIGKILL — see there for how a
+        // SIGTERM-only deadline let one wedged `get` stop every later cover for the session.
+        guard case .output(let data) = NowPlayingOneShot.run(
+            executable: executable,
+            arguments: arguments,
+            byteLimit: byteLimit,
+            timeout: timeout
+        ) else { return FetchedArtwork(image: nil, identity: nil) }
 
         return decodeArtwork(fromPayload: data, maximumPixelSize: maximumPixelSize)
     }

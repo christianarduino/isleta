@@ -169,6 +169,9 @@ public struct SourceToggles: Equatable, Sendable {
             case .focusChanged: true
             case .screenSharing: screenSharing
             case .shelf: true
+            // Governed by "Check for updates automatically" in General, which is Sparkle's own
+            // setting — a second switch here would be two answers to one question.
+            case .updateAvailable: true
             }
         }
         set {
@@ -187,6 +190,7 @@ public struct SourceToggles: Equatable, Sendable {
             case .focusChanged: break
             case .screenSharing: screenSharing = newValue
             case .shelf: break
+            case .updateAvailable: break
             }
         }
     }
@@ -214,6 +218,7 @@ public struct SourceToggles: Equatable, Sendable {
         case .focusChanged: nil
         case .screenSharing: \IsletaConfiguration.sources.screenSharing
         case .shelf: nil
+        case .updateAvailable: nil
         }
     }
 

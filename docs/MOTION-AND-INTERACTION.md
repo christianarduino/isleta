@@ -573,6 +573,17 @@ and stopped", which is the whole symptom. Two steps and no settle in between, de
 against the previous implementation the same binary reports
 `swiped left twice with no pause between → home`.
 
+### A swipe over an activity goes to the pages
+
+An activity that brought its own body — a call, a level, a meeting — keeps it until the open
+island is swiped. Then the activity is read as standing just before home: forward lands on home,
+back on the last page, and the neighbours drawn during the drag are those two
+(`IslandPageRoster.stepped(fromActivityBy:)`). Once turned, the pages own the body
+(`IslandPageModel.isCoveringActivity`) until the island closes or a *different* activity takes the
+stage; the activity updating does not take it back. Before this, the swipe turned `current`
+underneath a body the activity kept drawing, so every page looked like a copy of the call. A dot
+tapped over an activity does the same.
+
 ## The dots go away, and what keeps them reachable
 
 Decided 2026-08-29, on the report that three permanent marks under every page are saying "there are
