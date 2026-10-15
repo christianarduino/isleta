@@ -131,6 +131,8 @@ brightness are separate switches, and both need Accessibility — decline it and
 - **A call in progress**, and how long it's been going
 - **Welcome back** — a greeting on wake, in the right language for the hour
 - **Screen sharing**, so you know when you're being watched
+- **An update waiting** — Isleta's icon beside the notch with a download mark, even while music
+  plays. Open the island to read what's new, then press Install Update… to install and restart
 - **A lock screen card** showing what's playing — glass, so your wallpaper reads through it,
   with previous, play-pause and next that work over the lock (off until you turn it on)
 
@@ -273,6 +275,8 @@ actually pressed.
   can sit over the middle of the space labels.
 - **Today and tomorrow show five entries and then a count.** A busy pair of days says how many it
   couldn't fit rather than scrolling.
+- **Swiping away from a meeting hides its Join button until the island next opens.** The meeting
+  stays in the island's edges, and the button is back the next time you open it.
 - **The equalizer moves in a set pattern rather than to the song.** Its colors come from the cover;
   its motion doesn't come from the audio.
 - **The hover target is the notch itself** — about 185 points wide, and easy to overshoot.
