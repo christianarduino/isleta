@@ -107,6 +107,7 @@ public enum SettingsMigration {
         if version < 25 { migrateV24ToV25(&object) }
         if version < 26 { migrateV25ToV26(&object) }
         if version < 27 { migrateV26ToV27(&object) }
+        if version < 28 { removeNonBooleans(["showsAudioSourcesPage"], from: &object) }
 
         object["schemaVersion"] = IsletaConfiguration.currentSchemaVersion
         return object

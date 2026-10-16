@@ -171,6 +171,9 @@ public struct IsletaConfiguration: Equatable, Sendable {
     /// about the card. What it plays is in `LockScreenSound`.
     public var playsUnlockSound: Bool
 
+    /// Whether the audio applications page is included in the carousel. Monitoring is unchanged.
+    public var showsAudioSourcesPage: Bool
+
     public init(
         schemaVersion: Int = IsletaConfiguration.currentSchemaVersion,
         suppressSystemHUDs: Bool = false,
@@ -184,7 +187,8 @@ public struct IsletaConfiguration: Equatable, Sendable {
         showsNowPlayingOnLockScreen: Bool = false,
         hiddenApplications: [String] = [],
         minimalOnSynthesizedDisplays: Bool = false,
-        playsUnlockSound: Bool = false
+        playsUnlockSound: Bool = false,
+        showsAudioSourcesPage: Bool = true
     ) {
         self.schemaVersion = schemaVersion
         self.suppressSystemHUDs = suppressSystemHUDs
@@ -202,6 +206,7 @@ public struct IsletaConfiguration: Equatable, Sendable {
         self.hiddenApplications = hiddenApplications
         self.minimalOnSynthesizedDisplays = minimalOnSynthesizedDisplays
         self.playsUnlockSound = playsUnlockSound
+        self.showsAudioSourcesPage = showsAudioSourcesPage
     }
 
     /// The schema version this build writes.
@@ -259,8 +264,8 @@ public struct IsletaConfiguration: Equatable, Sendable {
     /// read as `false` and go quiet on every Mac that has been making the sound since 2.0. The step
     /// seeds it from `showsNowPlayingOnLockScreen` instead, which is exactly what the folded field
     /// meant, so no Mac changes what it does on upgrade.
-    /// Version 27 restores native level HUDs by default for new and existing installations.
-    public static let currentSchemaVersion = 27
+    /// Version 28 adds audio-page visibility, defaulting to visible for existing installations.
+    public static let currentSchemaVersion = 28
 
     /// What a machine that has never opened Settings runs with.
     public static let defaults = IsletaConfiguration()
@@ -290,6 +295,7 @@ public struct IsletaConfiguration: Equatable, Sendable {
             keys.append("minimalOnSynthesizedDisplays")
         }
         if old.playsUnlockSound != new.playsUnlockSound { keys.append("playsUnlockSound") }
+        if old.showsAudioSourcesPage != new.showsAudioSourcesPage { keys.append("showsAudioSourcesPage") }
         return keys
     }
 }
@@ -322,6 +328,7 @@ extension IsletaConfiguration: Codable {
         try container.encode(hiddenApplications, forKey: .hiddenApplications)
         try container.encode(minimalOnSynthesizedDisplays, forKey: .minimalOnSynthesizedDisplays)
         try container.encode(playsUnlockSound, forKey: .playsUnlockSound)
+        try container.encode(showsAudioSourcesPage, forKey: .showsAudioSourcesPage)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -338,6 +345,7 @@ extension IsletaConfiguration: Codable {
         case hiddenApplications
         case minimalOnSynthesizedDisplays
         case playsUnlockSound
+        case showsAudioSourcesPage
     }
 
     /// Decoding is deliberately lenient: any key that is missing or malformed falls back to its
@@ -397,6 +405,7 @@ extension IsletaConfiguration: Codable {
         // already had the sound: it writes this key from the card's own value before the decoder
         // ever sees the blob, so "absent" here means a genuinely new install rather than an upgrade.
         playsUnlockSound = value(.playsUnlockSound, defaults.playsUnlockSound)
+        showsAudioSourcesPage = value(.showsAudioSourcesPage, defaults.showsAudioSourcesPage)
 
         // Applied last, because `toggleHotKey` is a computed forwarder and writing through it
         // touches `self` — which is not allowed until every stored property exists.

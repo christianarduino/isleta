@@ -270,6 +270,9 @@ actually pressed.
 - **Native volume and brightness HUDs are the default.** Isleta's duplicate HUD source and both
   replacement switches are off, including after upgrade. They remain optional in Settings → Sources.
   Automatic brightness changes do not announce themselves in the default island.
+- **Audio sources lists applications, including observed paused sessions.** Select a row to open
+  its app. Browser tabs share one row; a browser session paused before observation may be absent.
+  The page never sends a global play/pause command or closes an app.
 - **A muted Mac's bar can't be dragged.** It's drawn at nothing whatever the volume behind it is, so
   pressing it opens the island instead. Unmute first.
 - **The island sits above Mission Control.** In a real notch it covers nothing; a floating island
