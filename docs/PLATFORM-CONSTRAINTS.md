@@ -4,6 +4,13 @@ Verified on macOS 27.0 — what each system API actually does, and which ones re
 
 Extracted from `CLAUDE.md`, which now carries the map rather than the record.
 
+## Native system feedback
+
+System level HUDs are optional since schema 27. The source and both replacement flags default off
+and migrate off together: native macOS HUDs own manual volume/brightness feedback, while automatic
+brightness changes produce no island activity under the default configuration. The earlier API
+measurements above remain historical evidence, not a statement of current default behavior.
+
 <details>
 <summary>Topics in this file (59)</summary>
 

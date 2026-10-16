@@ -137,45 +137,12 @@ public struct IsletaConfiguration: Equatable, Sendable {
     /// `hiddenApplications`, and for the same reason.
     public var minimalOnSynthesizedDisplays: Bool
 
-    /// Whether Isleta replaces Apple's volume HUD instead of appearing beside it.
-    ///
-    /// **Removed in schema 4 and back in schema 23**, which is the whole story of this flag. It was
-    /// withdrawn because it was a switch that could never move: `SystemHUDSuppression` suppressed
-    /// nothing, and `PLATFORM-CONSTRAINTS.md` says in as many words *"do not reintroduce the setting
-    /// without a mechanism"*. There is now a mechanism — `MediaKeyMonitor` in `.replace` swallows
-    /// the volume keys and `SystemVolumeControl` does what they would have done — measured on
-    /// 2026-08-30, so this is that condition being met rather than being forgotten.
-    ///
-    /// **True as of 2026-09-07, and it was false for the whole of 2.0 and 2.1.** The old default was
-    /// the brief's first condition for suppression — an app that becomes the implementation of the
-    /// volume keys for somebody who never asked has taken their volume keys away — and the owner
-    /// reversed it knowingly, on the ground that a user who installs an app whose whole subject is
-    /// the notch has asked for the notch to be where the volume goes. The condition it replaces is
-    /// **consent through the permission**: nothing is suppressed until Accessibility is granted
-    /// (`SourceHub` gates both flags on `AXIsProcessTrusted()`), the first run asks for it by name,
-    /// and one switch in Settings puts Apple's HUD back.
-    ///
-    /// What the reversal costs is stated where the mechanism is (`SystemHUDSuppression`,
-    /// `docs/PLATFORM-CONSTRAINTS.md`): a `SIGSTOP` outlives the process that sent it, so a
-    /// force-quit or a panic now leaves Apple's HUD frozen for users who never opted in, until
-    /// `SystemOSDSuppressor.repairAtLaunch()` thaws it at Isleta's next launch.
-    ///
-    /// Volume and mute. Brightness is its own flag below — see `SystemHUDSuppression.suppressible`.
+    /// Opt-in replacement for the macOS volume HUD. Off since schema 27: native HUDs own levels
+    /// by default, including after upgrade. The separate source switch also stays off until asked.
     public var suppressSystemHUDs: Bool
 
-    /// Whether Isleta replaces Apple's brightness HUD instead of appearing beside it.
-    ///
-    /// **A second flag rather than a widening of `suppressSystemHUDs`**, because the two levels carry
-    /// different risk and a user may reasonably want one without the other. Volume is recoverable if
-    /// Isleta gets it wrong — the slider is in Control Center. Brightness is the one
-    /// `SystemHUDSuppression` spent a year calling "not a gray area; it is a broken laptop", and
-    /// while the API claim behind that was false, a screen somebody cannot dim is still the worse
-    /// failure. Folding them into one switch would make accepting the cheaper risk mean accepting
-    /// the dearer one.
-    ///
-    /// **True as of 2026-09-07**, with `suppressSystemHUDs` and on the same reasoning. It stays a
-    /// separate flag: the risks are still different sizes, and a user who wants Apple's brightness
-    /// HUD back must be able to have it without giving up the volume one.
+    /// Opt-in replacement for the macOS brightness HUD. Off since schema 27, independently of
+    /// volume, so automatic display adjustments never interrupt the default island.
     public var suppressBrightnessHUD: Bool
 
     /// Whether coming back to the Mac makes a sound.
@@ -206,8 +173,8 @@ public struct IsletaConfiguration: Equatable, Sendable {
 
     public init(
         schemaVersion: Int = IsletaConfiguration.currentSchemaVersion,
-        suppressSystemHUDs: Bool = true,
-        suppressBrightnessHUD: Bool = true,
+        suppressSystemHUDs: Bool = false,
+        suppressBrightnessHUD: Bool = false,
         toggleHotKey: HotKeyBinding = .toggleIsland,
         shortcuts: Shortcuts = Shortcuts(),
         sources: SourceToggles = SourceToggles(),
@@ -292,7 +259,8 @@ public struct IsletaConfiguration: Equatable, Sendable {
     /// read as `false` and go quiet on every Mac that has been making the sound since 2.0. The step
     /// seeds it from `showsNowPlayingOnLockScreen` instead, which is exactly what the folded field
     /// meant, so no Mac changes what it does on upgrade.
-    public static let currentSchemaVersion = 26
+    /// Version 27 restores native level HUDs by default for new and existing installations.
+    public static let currentSchemaVersion = 27
 
     /// What a machine that has never opened Settings runs with.
     public static let defaults = IsletaConfiguration()
